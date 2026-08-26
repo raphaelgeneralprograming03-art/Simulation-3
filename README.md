@@ -1,282 +1,200 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DSMAC - Combate Drone Visível</title>
-    <style>
-        body {
-            margin: 0;
-            overflow: hidden;
-            background-color: #0b131a;
-            font-family: 'Courier New', Courier, monospace;
-            color: #39ff14;
-        }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Visor Tático Aéreo 3D - Visão de Satélite & Câmera EO/IR</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { overflow: hidden; background-color: #000; font-family: 'Courier New', Courier, monospace; color: #00ffcc; }
+    #canvas-container { width: 100vw; height: 100vh; }
 
-        #canvas-container {
-            width: 100vw;
-            height: 100vh;
-            position: absolute;
-            top: 0;
-            left: 0;
-            z-index: 1;
-        }
+    /* HUD ESTÁTICO (IMAGEM VIRTUAL DE TELA) */
+    #hud-overlay {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100vw; height: 100vh;
+      pointer-events: none; /* Mantém a interação 3D do mouse ativa abaixo */
+      border: 20px solid rgba(0, 255, 204, 0.15);
+      box-sizing: border-box;
+    }
 
-        #hud {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            background: rgba(6, 12, 18, 0.9);
-            padding: 20px;
-            border: 1px solid #39ff1433;
-            border-radius: 4px;
-            z-index: 10;
-            width: 340px;
-            pointer-events: none;
-            box-shadow: 0 0 20px rgba(57, 255, 20, 0.1);
-        }
+    /* Retícula Central de Mira */
+    .reticle-box {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 160px; height: 160px;
+      border: 2px solid #00ffcc;
+      border-radius: 50%;
+      box-shadow: 0 0 10px rgba(0, 255, 204, 0.5);
+    }
+    .reticle-box::before {
+      content: '';
+      position: absolute;
+      top: 50%; left: -20px; right: -20px;
+      height: 2px; background: #00ffcc;
+    }
+    .reticle-box::after {
+      content: '';
+      position: absolute;
+      left: 50%; top: -20px; bottom: -20px;
+      width: 2px; background: #00ffcc;
+    }
+    .center-dot {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 8px; height: 8px;
+      background: #ff3366;
+      border-radius: 50%;
+      box-shadow: 0 0 8px #ff3366;
+    }
 
-        h2 {
-            margin: 0 0 5px 0;
-            font-size: 15px;
-            letter-spacing: 1px;
-            color: #ffffff;
-        }
-
-        .stat {
-            font-size: 11px;
-            margin: 8px 0;
-            display: flex;
-            justify-content: space-between;
-        }
-
-        .label {
-            color: #a0b0a0;
-        }
-
-        .value {
-            font-weight: bold;
-            text-shadow: 0 0 5px rgba(57, 255, 20, 0.5);
-        }
-
-        .alert-active {
-            color: #ff3333;
-            animation: blink 1s infinite;
-        }
-
-        @keyframes blink {
-            50% { opacity: 0.3; }
-        }
-
-        #instructions {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.8);
-            padding: 8px 16px;
-            border-radius: 4px;
-            font-size: 11px;
-            z-index: 10;
-            pointer-events: none;
-            border: 1px solid #39ff1422;
-            color: #ffffff;
-        }
-    </style>
+    /* Caixas de Telemetria Virtual */
+    .data-panel {
+      position: absolute;
+      background: rgba(5, 12, 20, 0.85);
+      border: 1px solid #00ffcc;
+      padding: 12px 18px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .top-left { top: 30px; left: 30px; }
+    .top-right { top: 30px; right: 30px; text-align: right; }
+    .bottom-left { bottom: 30px; left: 30px; }
+    
+    .txt-red { color: #ff3366; font-weight: bold; }
+    .txt-green { color: #00ffcc; font-weight: bold; }
+    .txt-yellow { color: #ffcc00; font-weight: bold; }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 </head>
 <body>
 
-<div id="canvas-container"></div>
+  <div id="canvas-container"></div>
 
-<div id="hud">
-    <h2>SISTEMA INTERCEPTADOR ATR</h2>
-    <hr style="border-color: #39ff1433; margin-bottom: 12px;">
-    <div class="stat"><span class="label">INTERFERÊNCIA EW (JAMMING):</span> <span class="value alert-active">MÁXIMA (SINAL SAT OUT)</span></div>
-    <div class="stat"><span class="label">SISTEMA ANTI-BLOQUEIO:</span> <span class="value" style="color: #00ffff;">DSMAC LOCAL ATIVO</span></div>
-    <div class="stat"><span class="label">ALVOS DESTRUÍDOS:</span> <span class="value" id="hud-score" style="color:#ffffff;">0</span></div>
-    <div class="stat"><span class="label">AUTO-GUIA (HÉLICES):</span> <span class="value" style="color: #ff9900;">VETOR DE COLISÃO</span></div>
-</div>
+  <!-- HUD E CAMADA VIRTUAL 2D SOBREPOSTA -->
+  <div id="hud-overlay">
+    <div class="reticle-box">
+      <div class="center-dot"></div>
+    </div>
 
-<div id="instructions">Use o mouse (clique e arraste) para girar a câmera e ver os drones voando</div>
+    <div class="data-panel top-left">
+      <div>SYS: <span class="txt-green">EO/IR CAMERA [ACTIVE]</span></div>
+      <div>MODE: <span class="txt-yellow">SATELLITE/AIR LOCK</span></div>
+      <div>LAT: <span class="txt-green">48°26'19.2"N</span></div>
+      <div>LON: <span class="txt-green">37°48'12.4"E</span></div>
+    </div>
 
-<script src="https://cloudflare.com"></script>
-<script src="https://jsdelivr.net"></script>
+    <div class="data-panel top-right">
+      <div>JAMMING EVISION: <span class="txt-red">98.5 dB</span></div>
+      <div>STATUS: <span class="txt-green">HARDWARE ISOLATED</span></div>
+      <div>SYSTEM EFFICIENCY: <span class="txt-green">94.0%</span></div>
+    </div>
 
-<script>
-    // --- CONFIGURAÇÃO ATMOSFÉRICA DA CENA ---
-    const container = document.getElementById('canvas-container');
+    <div class="data-panel bottom-left">
+      <div>TARGET ID: <span class="txt-red">ARMOURED_VEHICLE_T72</span></div>
+      <div>OPTICAL ERROR E(t): <span class="txt-yellow">Ex: 0.00px | Ey: 0.00px</span></div>
+      <div>TRACKING: <span class="txt-green">LOCKED ON TARGET</span></div>
+    </div>
+  </div>
+
+  <script>
+    // --- 1. CENA E CÂMERA AÉREA DE VISÃO TÁTICA ---
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0f14);
-    scene.fog = new THREE.FogExp2(0x0a0f14, 0.015);
+    scene.background = new THREE.Color(0x050a12);
 
-    // Câmera posicionada mais perto para garantir visibilidade imediata
-    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 15, 40);
+    // Câmera posicionada no alto simulando visão aérea/satélite de ataque
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 35, 25);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    container.appendChild(renderer.domElement);
+    document.getElementById('canvas-container').appendChild(renderer.domElement);
 
     const controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
+    controls.target.set(0, 0, 0);
 
-    // --- ILUMINAÇÃO FORTE ---
-    const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
-    scene.add(ambientLight);
+    // Luzes da Cena
+    scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+    const sunLight = new THREE.DirectionalLight(0xffddaa, 1.2);
+    sunLight.position.set(30, 50, 20);
+    scene.add(sunLight);
 
-    const dirLight = new THREE.DirectionalLight(0x00f0ff, 1.5);
-    dirLight.position.set(20, 40, 20);
-    scene.add(dirLight);
+    // --- 2. IMAGEM DE SATÉLITE / MAPA NO SOLO ---
+    // Criando a textura do mapa/satélite procedimentalmente (estilo Google Maps Satélite)
+    const canvasMap = document.createElement('canvas');
+    canvasMap.width = 1024; canvasMap.height = 1024;
+    const ctx = canvasMap.getContext('2d');
 
-    // --- TERRENO DE COMBATE ---
-    const grid = new THREE.GridHelper(100, 40, 0x1f3d52, 0x102030);
-    grid.position.y = -10;
-    scene.add(grid);
+    // Fundo de Vegetação/Campo Agrícola (Estilo Leste Europeu)
+    ctx.fillStyle = '#2d3a22';
+    ctx.fillRect(0, 0, 1024, 1024);
 
-    // --- MODELAGEM GRANDE: DRONE INTERCEPTADOR (NOSSO DRONE) ---
-    const droneGroup = new THREE.Group();
-    
-    // Corpo robusto e escuro
-    const bodyGeo = new THREE.CylinderGeometry(2, 2.5, 1, 6);
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1a232c, metalness: 0.8, roughness: 0.2 });
-    const droneBody = new THREE.Mesh(bodyGeo, bodyMat);
-    droneGroup.add(droneBody);
+    // Detalhes do Terreno (Campos de cultivo)
+    ctx.fillStyle = '#3a4a2c';
+    ctx.fillRect(50, 50, 400, 924);
+    ctx.fillStyle = '#222c19';
+    ctx.fillRect(480, 50, 480, 400);
 
-    // Câmera/Lente DSMAC frontal brilhante
-    const eyeGeo = new THREE.SphereGeometry(0.6, 16, 16);
-    const eyeMat = new THREE.MeshBasicMaterial({ color: 0x39ff14 });
-    const droneEye = new THREE.Mesh(eyeGeo, eyeMat);
-    droneEye.position.set(0, 0, 2.2);
-    droneGroup.add(droneEye);
+    // Estradas Rurais de Terra (Cruzamento Tático)
+    ctx.strokeStyle = '#7a684d';
+    ctx.lineWidth = 40;
+    ctx.beginPath();
+    ctx.moveTo(0, 512); ctx.lineTo(1024, 512); // Estrada horizontal
+    ctx.moveTo(512, 0); ctx.lineTo(512, 1024); // Estrada vertical
+    ctx.stroke();
 
-    // Grandes braços das hélices
-    const armGeo = new THREE.BoxGeometry(9, 0.3, 0.4);
-    const armMat = new THREE.MeshStandardMaterial({ color: 0x2c3e50 });
-    const arm1 = new THREE.Mesh(armGeo, armMat);
-    arm1.rotation.y = Math.PI / 4;
-    droneGroup.add(arm1);
-    const arm2 = new THREE.Mesh(armGeo, armMat);
-    arm2.rotation.y = -Math.PI / 4;
-    droneGroup.add(arm2);
+    const mapTexture = new THREE.CanvasTexture(canvasMap);
+    const groundGeo = new THREE.PlaneGeometry(80, 80);
+    const groundMat = new THREE.MeshStandardMaterial({ map: mapTexture, roughness: 0.8 });
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    scene.add(ground);
 
-    // Hélices visíveis
-    const propGeo = new THREE.BoxGeometry(3.5, 0.05, 0.3);
-    const propMat = new THREE.MeshStandardMaterial({ color: 0x000000 });
-    const propellers = [];
-    const propPositions = [[3.2, 0.6, 3.2], [-3.2, 0.6, 3.2], [3.2, 0.6, -3.2], [-3.2, 0.6, -3.2]];
+    // --- 3. MODELO 3D VIRTUAL DO TANQUE DE GUERRA (BLINDADO T-72) ---
+    const tankGroup = new THREE.Group();
 
-    propPositions.forEach((pos) => {
-        const prop = new THREE.Mesh(propGeo, propMat);
-        prop.position.set(pos[0], pos[1], pos[2]);
-        droneGroup.add(prop);
-        propellers.push(prop);
-    });
+    // Chassi / Lagartas
+    const chassisMat = new THREE.MeshStandardMaterial({ color: 0x1c2419, roughness: 0.6, metalness: 0.4 });
+    const chassis = new THREE.Mesh(new THREE.BoxGeometry(4, 1.2, 7), chassisMat);
+    chassis.position.y = 0.6;
+    tankGroup.add(chassis);
 
-    scene.add(droneGroup);
+    // Torre do Tanque
+    const turretMat = new THREE.MeshStandardMaterial({ color: 0x273323, roughness: 0.5, metalness: 0.5 });
+    const turret = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.8, 1.0, 12), turretMat);
+    turret.position.set(0, 1.5, -0.2);
+    tankGroup.add(turret);
 
-    // --- MODELAGEM GRANDE: DRONE INIMIGO (ALVO MÓVEL) ---
-    const enemyGroup = new THREE.Group();
-    
-    // Fuselagem esférica blindada inimiga
-    const enemyBodyGeo = new THREE.SphereGeometry(2, 12, 12);
-    const enemyBodyMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.9 });
-    const enemyBody = new THREE.Mesh(enemyBodyGeo, enemyBodyMat);
-    enemyGroup.add(enemyBody);
+    // Canhão Principal
+    const barrelMat = new THREE.MeshStandardMaterial({ color: 0x111610, metalness: 0.8 });
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 5), barrelMat);
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.set(0, 1.6, 3);
+    tankGroup.add(barrel);
 
-    // Assinatura de travamento digital e térmica ATR (Wireframe Laranja Neon bem grande)
-    const signatureGeo = new THREE.BoxGeometry(4.5, 4.5, 4.5);
-    const signatureMat = new THREE.MeshBasicMaterial({ color: 0xff4500, wireframe: true, transparent: true, opacity: 0.6 });
-    const signatureBox = new THREE.Mesh(signatureGeo, signatureMat);
-    enemyGroup.add(signatureBox);
+    // Posiciona o tanque exatamente no centro da retícula (P_alvo)
+    tankGroup.position.set(0, 0, 0);
+    scene.add(tankGroup);
 
-    scene.add(enemyGroup);
-
-    // --- RAIO LASER ÓPTICO DE RASTREAMENTO (DSMAC ANTI-JAMMING) ---
-    const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
-    const lineMat = new THREE.LineBasicMaterial({ color: 0x39ff14, linewidth: 3 }); // Linha verde forte
-    const lockLine = new THREE.Line(lineGeo, lineMat);
-    scene.add(lockLine);
-
-    // --- POSIÇÕES INICIAIS ---
-    let dronePos = new THREE.Vector3(-18, 5, -5);
-    let enemyPos = new THREE.Vector3(15, 2, 10);
-    let droneSpeed = 16.0; 
-    let score = 0;
-
-    droneGroup.position.copy(dronePos);
-    enemyGroup.position.copy(enemyPos);
-
-    const clock = new THREE.Clock();
-    const hudScore = document.getElementById('hud-score');
-
-    function respawnInimigo() {
-        // Teleporta o inimigo para um ponto distante no ar aleatório para recomeçar a caça
-        enemyPos.set(
-            (Math.random() - 0.5) * 35 + 10,
-            (Math.random() * 10) + 1,
-            (Math.random() - 0.5) * 35
-        );
-        enemyGroup.position.copy(enemyPos);
-        score++;
-        hudScore.innerText = score;
+    // --- 4. RENDERIZAÇÃO ESTÁTICA DEDICADA ---
+    function renderScene() {
+      requestAnimationFrame(renderScene);
+      controls.update();
+      renderer.render(scene, camera);
     }
 
-    // --- LOOP DE ANIMAÇÃO ---
-    function animate() {
-        requestAnimationFrame(animate);
-        const dt = clock.getDelta();
-        const time = clock.getElapsedTime();
-
-        // 1. Voo caótico e evasivo do Drone Inimigo pelo ar
-        enemyPos.x = 18 * Math.sin(time * 0.5);
-        enemyPos.z = 15 * Math.cos(time * 0.3);
-        enemyPos.y = 4 * Math.sin(time * 1.2) + 2; // Oscilação de altitude no ar
-        enemyGroup.position.copy(enemyPos);
-
-        // Giro da caixa de assinatura digital do alvo
-        signatureBox.rotation.y += 0.02;
-
-        // 2. Perseguição Autônoma DSMAC (Cálculo de aproximação sem rádio)
-        const vectorToTarget = new THREE.Vector3().subVectors(enemyPos, dronePos);
-        const distance = vectorToTarget.length();
-
-        if (distance > 2.5) {
-            const direction = vectorToTarget.clone().normalize();
-            
-            // Computador de bordo altera rotação física das hélices e corrige a rota
-            dronePos.addScaledVector(direction, droneSpeed * dt);
-            droneGroup.position.copy(dronePos);
-            
-            // O drone aponta fisicamente o nariz/lente para o alvo móvel
-            droneGroup.lookAt(enemyPos);
-
-            // Gira as hélices rapidamente
-            propellers.forEach((prop) => {
-                prop.rotation.y += 40 * dt;
-            });
-        } else {
-            // Se aproximou o suficiente, considera alvo interceptado e gera outro
-            respawnInimigo();
-        }
-
-        // 3. Mantém a linha de travamento óptico atualizada entre os dois drones
-        const points = [droneGroup.position.clone(), target = enemyGroup.position.clone()];
-        lockLine.geometry.setFromPoints(points);
-
-        controls.update();
-        renderer.render(scene, camera);
-    }
-
-    // AJUSTE DE TELA RESPONSIVO
     window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    animate();
-</script>
-
+    renderScene();
+  </script>
 </body>
+</html>
